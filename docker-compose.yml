@@ -1,0 +1,68 @@
+version: '3.8'
+
+networks:
+  net_app:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  net_visitors:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+volumes:
+  pg_sys_data:
+  pg_erp_data:
+  pg_rrhh_data:
+  pg_logs:
+
+services:
+  db_server:
+    image: postgres:16.2-alpine  # Versió fixada (res de latest)
+    container_name: postgres_db
+    restart: always              # Configuració contra caigudes (Requisit 7)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Dades del sistema
+      - pg_sys_data:/var/lib/postgresql/data
+      # Volums separats per a ERP i RRHH (Tablespaces)
+      - pg_erp_data:/mnt/tablespaces/erp
+      - pg_rrhh_data:/mnt/tablespaces/rrhh
+      # Log persistent
+      - pg_logs:/var/log/postgresql
+      # Fitxers de configuració personalitzats
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    command: >
+      postgres 
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    deploy:
+      resources:
+        limits:
+          memory: 2048M         # Lítmit estricte de 2 GB de RAM
+    networks:
+      - net_app
+      - net_visitors
+    # SENSE ports publicats al host (`ports:` omitit)
+
+  # Client de prova a la xarxa d'aplicació
+  client_app:
+    image: postgres:16.2-alpine
+    container_name: client_app
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      - net_app
+
+  # Client de prova a la xarxa de visitants
+  client_visitor:
+    image: postgres:16.2-alpine
+    container_name: client_visitor
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      - net_visitors
