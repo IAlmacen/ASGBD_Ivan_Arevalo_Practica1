@@ -187,3 +187,21 @@ Ejecutamos los siguientes comandos para confirmar que acepte las conexiones desd
 
 ![conexiones.png](img/conexiones.png)
 
+### 3.3 Comprobar memoria
+
+### 3.4 Comprobar connexions
+
+### 3.5 Comprobar emmagatzematge
+Primero nos aseguramos de que el usuario postgres tenga acceso a los tablespaces. Para ello, entraremos en el servidor y usaremos el comando chown postgres:postgres -R /mnt/tablespaces.
+
+Una vez hecho, crearemos los dos tablespaces, ERP y RRHH.
+
+![tablespaces_create.png](img/tablespaces_create.png)
+
+Después, creamos las bases de datos y revisamos que estén asociadas a los tablespaces:
+
+![databases.png](img/databases.png)
+
+Reiniciamos y comprobamos que se mantengan:
+
+![persistance.png](img/persistance.png)
