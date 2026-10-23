@@ -187,11 +187,38 @@ Ejecutamos los siguientes comandos para confirmar que acepte las conexiones desd
 
 ![conexiones.png](img/conexiones.png)
 
+---
+
 ### 3.3 Comprobar memoria
+* **Paràmetre modificable en calent (`work_mem`):** Permet ajustar la memòria per operació de classificació o hash per sessió sense reiniciar el servei[cite: 3].
+  * *Comprovació:* Podem executar `ALTER SYSTEM SET work_mem = '16MB';` i recarregar la configuració amb `SELECT pg_reload_conf();` consultant posteriorment amb `SHOW work_mem;`.
+* **Paràmetre que requereix reinici (`shared_buffers`):** Defineix la memòria compartida de PostgreSQL per a la caché de dades[cite: 3]. Si es modifica en calent amb `ALTER SYSTEM`, el valor en ús no canvia fins que es reinicia el contenidor de Docker (`docker compose restart db_server`).
+
+---
 
 ### 3.4 Comprobar connexions
+* Hem configurat `max_connections = 60` al fitxer `postgresql.conf`[cite: 3]. 
+* Si intentem obrir connexions de manera massiva superant aquest límit (o el límit específic de 45 connexions assignat al compte `erp_user`), el servidor rebutja noves connexions retornant un error de tipus `FATAL: sorry, too many clients already`.
 
-### 3.5 Comprobar emmagatzematge
+---
+
+### 3.5 Traçabilitat (Logs)
+Gràcies a la configuració del `logging_collector` activada a `postgresql.conf`[cite: 3] i mapejada al volum persistent `pg_logs`[cite: 2], tots els intents de connexió fallits (com els blocs de la xarxa de visitants definits al `pg_hba.conf`) queden registrats de manera permanent dins del directori de logs del contenidor[cite: 2, 3, 4], resistint a la destrucció d'aquest.
+
+---
+
+### 3.6 Accés del personal i Rols
+* **Analistes:** Mitjançant la creació de la vista `vista_empleats_sense_salari` (que exclou el camp `salari`), els usuaris que pertanyen al `rol_analistes` poden consultar la informació general dels empleats, però qualsevol consulta directa sobre la columna de salaris o la taula base és rebutjada per permisos[cite: 5].
+* **Gestió d'usuaris:** Afegir un analista nou només requereix crear el compte i assignar-li el rol (`GRANT rol_analistes TO nou_analista;`), de la mateixa manera que retirar-li l'accés es fa instantàniament amb `REVOKE rol_analistes FROM ex_analista;`[cite: 5].
+
+---
+
+### 3.7 Ampliació: Caiguda sobtada
+* El servei està configurat al `docker-compose.yml` amb `restart: always`[cite: 2], la qual cosa garanteix que si el procés o el contenidor cau de manera imprevista (fallada elèctrica o error crític), Docker s'encarrega de tornar-lo a aixecar automàticament.
+* Durant el procés d'arrencada posterior, PostgreSQL utilitza el mecanisme de registre d'Escriptura Prèvia (WAL - Write-Ahead Logging) per recuperar la consistència: les transaccions confirmades amb `COMMIT` es mantenen al disc i les no confirmades es descarten de forma automàtica.
+
+
+### 3.8 Comprobar emmagatzematge
 Primero nos aseguramos de que el usuario postgres tenga acceso a los tablespaces. Para ello, entraremos en el servidor y usaremos el comando chown postgres:postgres -R /mnt/tablespaces.
 
 Una vez hecho, crearemos los dos tablespaces, ERP y RRHH.
