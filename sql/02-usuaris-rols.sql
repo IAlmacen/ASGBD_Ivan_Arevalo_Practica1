@@ -1,15 +1,23 @@
--- Creació del compte propietari i aplicació ERP
-CREATE USER erp_owner PASSWORD 'erp_owner_secure_pass';
-CREATE USER erp_user PASSWORD 'erp_user_secure_pass' CONNECTION LIMIT 45 VALID UNTIL 'infinity';
-
--- Creació de rols per al personal de RRHH i Analistes
+-- Rols globals
 CREATE ROLE rol_rrhh;
 CREATE ROLE rol_analistes;
 
--- Usuaris individuals de prova (amb caducitat de contrasenya a 90 dies)
-CREATE USER usuari_rrhh1 PASSWORD 'rrhh1_pass' VALID UNTIL CURRENT_TIMESTAMP + INTERVAL '90 days';
-CREATE USER usuari_analista1 PASSWORD 'analista1_pass' VALID UNTIL CURRENT_TIMESTAMP + INTERVAL '90 days';
+-- ERP
+CREATE USER erp_owner PASSWORD 'erp_owner_pass' VALID UNTIL 'infinity';
+CREATE USER erp_user WITH PASSWORD 'erp_password_123' CONNECTION LIMIT 45 VALID UNTIL 'infinity';
 
--- Assignació de rols
-GRANT rol_rrhh TO usuari_rrhh1;
-GRANT rol_analistes TO usuari_analista1;
+-- Funció d'automatització de 90 dies
+CREATE OR REPLACE FUNCTION afegir_personal(p_usuari TEXT, p_password TEXT, p_rol TEXT)
+RETURNS VOID AS $$
+DECLARE
+    v_caducitat TIMESTAMP;
+BEGIN
+    v_caducitat := CURRENT_TIMESTAMP + INTERVAL '90 days';
+    EXECUTE format('CREATE USER %I PASSWORD %L VALID UNTIL %L', p_usuari, p_password, v_caducitat);
+    EXECUTE format('GRANT %I TO %I', p_rol, p_usuari);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Crear el personal inicial
+SELECT afegir_personal('usuari_rrhh1', 'rrhh1_pass', 'rol_rrhh');
+SELECT afegir_personal('usuari_analista1', 'analista1_pass', 'rol_analistes');
