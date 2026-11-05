@@ -9,6 +9,10 @@
 ---
 
 ## 1. Análisis del Escenario y Planificación
+Somos el DBA de la empresa VAPOR, una consultora tecnológica especializada en la convergencia segura entre los entornos OT (Operational Technology) e IT (Information Technology) para pymes manufactureras. 
+
+La empresa tiene una aplicación de gestión (ERP) y un equipo de personas que trabajan con la base de datos de la empresa. Nos han encargado desplegar un único servidor que pueda atender a todos los empleados, controlar quien accede y que puede hacer. 
+
 ### 1.1 Requisitos y parámetros de cálculo:
 - **Límite de RAM del servidor:** 2 GB (`2g`)
 - **Conexiones ERP:** 3 instancias × 15 conexiones = 45 conexiones simultáneas mínimas para ERP.
@@ -17,7 +21,6 @@
 - **Red bloqueada:** `172.31.0.0/24` (Visitantes).
 - **Límite de espacio ERP:** [100 MB si es Oracle / N/A si es PostgreSQL]
 
----
 
 ### 1.2 Tabla resumen del proyecto
 
@@ -32,9 +35,11 @@
 | **7. Cuenta de la aplicación** | Usuario propietario y de conexión con privilegios limitados y contraseña sin caducidad. | Apartado 3.7 |
 | **8. Acceso del personal** | Cuentas individuales, roles por perfiles, vistas sin salarios y caducidad de 90 días. | Apartado 3.8 |
 | **9. Ampliación: caída repentina** | Política `restart: always` en Docker Compose y recuperación de transacciones mediante WAL. | Apartado 2.1 y 3.9 |
----
+|
+
 
 ## 2. Creación de la estructura
+En este apartado explicaremos que hacen cada uno de los archivos de nuestro repositorio, y le daremos un sentido a toda la estructura. 
 
 ### 2.1 Configuración Docker Compose
 Nos aseguramos que nuestro servidor sea desplegable en todo momento y que no se pierdan datos. La manera de conseguir este objetivo es mediante un docker compose en el que asignemos volúmenes y una versión fija de cada imagen.
@@ -107,7 +112,7 @@ services:
     networks:
       - net_visitors
 ```
-
+  
 ### 2.2 Archivos de configuración PostgreSQL
 A continuación, crearemos un archivo de configuración que gestionará parámetros internos de nuestra base de datos, tales como el número de conexiones y la memoria RAM asignada para cada proceso.
 
@@ -135,7 +140,7 @@ log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
 log_connections = on
 log_disconnections = on
 ```
----
+
 
 ### 2.3 Configuración de redes del contenedor (pg_hba.conf)
 Configuramos qué conexiones pueden acceder a nuestro servidor de bases de datos y cuáles prohibimos.
@@ -166,6 +171,110 @@ POSTGRES_PASSWORD=ivan!1234
 POSTGRES_DB=postgres
 ```
 --- 
+
+### 2.5 Script de automatización (`setup-env.sh`)
+Para automatizar la inicialización del entorno y garantizar que la base de datos se configure de forma limpia y reproducible cada vez que se despliega el contenedor, utilizamos un script auxiliar que carga las variables de entorno y ejecuta los ficheros de inicialización SQL.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+
+echo "=== Arrancant els contenidors amb Docker Compose ==="
+docker compose up -d
+sleep 10
+
+echo "=== Assegurant permisos als directoris de tablespaces ==="
+docker exec -u root postgres_db mkdir -p /mnt/tablespaces/erp /mnt/tablespaces/rrhh
+docker exec -u root postgres_db chown -R postgres:postgres /mnt/tablespaces
+
+
+echo "=== Executant scripts d'inicialització SQL ==="
+docker exec -i postgres_db psql -U ${POSTGRES_USER:-admin_ivan} -d ${POSTGRES_DB:-postgres} < sql/01-tablespaces.sql
+docker exec -i postgres_db psql -U ${POSTGRES_USER:-admin_ivan} -d ${POSTGRES_DB:-postgres} < sql/02-usuaris-rols.sql
+docker exec -i postgres_db psql -U ${POSTGRES_USER:-admin_ivan} -d ${POSTGRES_DB:-postgres} < sql/03-dades-prova.sql
+
+echo "=== Desplegament completat amb èxit! ==="
+```
+
+---
+
+### 2.6 Scripts de Inicialización SQL (init.sql)
+
+Estos tres archivos centralizan la creación de tablas, tablespaces, roles y funciones automatizadas que se ejecutan durante la puesta en marcha del sistema:
+
+```SQL
+-- ==========================================================
+-- ARCHIVO 1. CREACIÓN DE TABLESPACES Y BASES DE DATOS (Apartado 3.5)
+-- ==========================================================
+-- Nota: Los directorios físicos deben estar previamente mapeados en Docker
+CREATE TABLESPACE erp_ts LOCATION '/mnt/tablespaces/erp';
+CREATE TABLESPACE rrhh_ts LOCATION '/mnt/tablespaces/rrhh';
+
+-- ==========================================================
+-- ARCHIVO 2. CONFIGURACIÓN DE ROLES Y CUENTAS DE APLICACIÓN (Apartado 3.7)
+-- ==========================================================
+-- Rols globals
+CREATE ROLE rol_rrhh;
+CREATE ROLE rol_analistes;
+
+-- ERP
+CREATE USER erp_owner PASSWORD 'erp_owner_pass' VALID UNTIL 'infinity';
+CREATE USER erp_user WITH PASSWORD 'erp_password_123' CONNECTION LIMIT 45 VALID UNTIL 'infinity';
+
+-- Funció d'automatització de 90 dies
+CREATE OR REPLACE FUNCTION afegir_personal(p_usuari TEXT, p_password TEXT, p_rol TEXT)
+RETURNS VOID AS $$
+DECLARE
+    v_caducitat TIMESTAMP;
+BEGIN
+    v_caducitat := CURRENT_TIMESTAMP + INTERVAL '90 days';
+    EXECUTE format('CREATE USER %I PASSWORD %L VALID UNTIL %L', p_usuari, p_password, v_caducitat);
+    EXECUTE format('GRANT %I TO %I', p_rol, p_usuari);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Crear el personal inicial
+SELECT afegir_personal('usuari_rrhh1', 'rrhh1_pass', 'rol_rrhh');
+SELECT afegir_personal('usuari_analista1', 'analista1_pass', 'rol_analistes');
+
+
+-- ==========================================================
+-- ARCHIVO 3. GESTIÓN DE USUARIOS Y ROLES DE PERSONAL (Apartado 3.8)
+-- ==========================================================
+-- Taula d'empleats a l'espai de RRHH
+CREATE TABLE empleats (
+    id SERIAL PRIMARY KEY,
+    nom VARCHAR(50),
+    departament VARCHAR(50),
+    salari NUMERIC(10, 2)
+) TABLESPACE tbs_rrhh;
+
+-- Inserció de dades de prova
+INSERT INTO empleats (nom, departament, salari) VALUES 
+('Anna Garcia', 'RRHH', 2500.00),
+('Joan Puig', 'IT', 3000.00);
+
+-- Vista per a analistes que amaga la columna de salaris (Requisit 8)
+CREATE VIEW vista_empleats_sense_salari AS 
+SELECT id, nom, departament 
+FROM empleats;
+
+-- Atorgar permisos al rol d'analistes només sobre la vista (i no sobre la taula original amb salaris)
+GRANT SELECT ON vista_empleats_sense_salari TO rol_analistes;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE empleats TO rol_rrhh;
+
+CREATE TABLE erp_comandes (
+    id SERIAL PRIMARY KEY,
+    article VARCHAR(100),
+    quantitat INT
+) TABLESPACE tbs_erp;
+
+ALTER TABLE erp_comandes OWNER TO erp_owner;
+GRANT SELECT, INSERT, UPDATE, DELETE ON erp_comandes TO erp_user;
+GRANT USAGE, SELECT ON SEQUENCE erp_comandes_id_seq TO erp_user;
+```
+
 
 ## 3. Demostraciones
 
